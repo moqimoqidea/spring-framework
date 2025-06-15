@@ -16,9 +16,12 @@
 
 package org.springframework.core.retry;
 
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import org.springframework.core.retry.support.MaxRetryAttemptsPolicy;
 import org.springframework.util.backoff.FixedBackOff;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,100 +38,99 @@ class RetryTemplateTests {
 
 	private final RetryTemplate retryTemplate = new RetryTemplate();
 
-	@Test
-	void retryWithSuccess() throws Exception {
-		RetryCallback<String> retryCallback = new RetryCallback<>() {
 
-			int failure;
-
-			@Override
-			public String run() throws Exception {
-				if (failure++ < 2) {
-					throw new Exception("Error while invoking greeting service");
-				}
-				return "hello world";
-			}
-
-			@Override
-			public String getName() {
-				return "greeting service";
-			}
-		};
-
-		retryTemplate.setBackOffPolicy(new FixedBackOff(100, Long.MAX_VALUE));
-
-		assertThat(retryTemplate.execute(retryCallback)).isEqualTo("hello world");
+	@BeforeEach
+	void configureTemplate() {
+		this.retryTemplate.setBackOffPolicy(new FixedBackOff(Duration.ofMillis(10)));
 	}
 
 	@Test
-	void retryWithFailure() {
-		Exception exception = new Exception("Error while invoking greeting service");
+	void retryWithImmediateSuccess() throws Exception {
+		AtomicInteger invocationCount = new AtomicInteger();
+		Retryable<String> retryable = () -> {
+			invocationCount.incrementAndGet();
+			return "always succeeds";
+		};
 
-		RetryCallback<String> retryCallback = new RetryCallback<>() {
+		assertThat(invocationCount).hasValue(0);
+		assertThat(retryTemplate.execute(retryable)).isEqualTo("always succeeds");
+		assertThat(invocationCount).hasValue(1);
+	}
+
+	@Test
+	void retryWithSuccessAfterInitialFailures() throws Exception {
+		AtomicInteger invocationCount = new AtomicInteger();
+		Retryable<String> retryable = () -> {
+			if (invocationCount.incrementAndGet() <= 2) {
+				throw new Exception("Boom!");
+			}
+			return "finally succeeded";
+		};
+
+		assertThat(invocationCount).hasValue(0);
+		assertThat(retryTemplate.execute(retryable)).isEqualTo("finally succeeded");
+		assertThat(invocationCount).hasValue(3);
+	}
+
+	@Test
+	void retryWithExhaustedPolicy() {
+		AtomicInteger invocationCount = new AtomicInteger();
+		RuntimeException exception = new RuntimeException("Boom!");
+
+		Retryable<String> retryable = new Retryable<>() {
 			@Override
-			public String run() throws Exception {
+			public String execute() {
+				invocationCount.incrementAndGet();
 				throw exception;
 			}
 
 			@Override
 			public String getName() {
-				return "greeting service";
+				return "test";
 			}
 		};
 
-		retryTemplate.setBackOffPolicy(new FixedBackOff(100, Long.MAX_VALUE));
-
+		assertThat(invocationCount).hasValue(0);
 		assertThatExceptionOfType(RetryException.class)
-				.isThrownBy(() -> retryTemplate.execute(retryCallback))
-				.withMessage("Retry policy for callback 'greeting service' exhausted; aborting execution")
+				.isThrownBy(() -> retryTemplate.execute(retryable))
+				.withMessage("Retry policy for operation 'test' exhausted; aborting execution")
 				.withCause(exception);
+		// 4 = 1 initial invocation + 3 retry attempts
+		assertThat(invocationCount).hasValue(4);
 	}
 
 	@Test
-	void retrySpecificException() {
+	void retryWithFailingRetryableAndCustomRetryPolicy() {
+		AtomicInteger invocationCount = new AtomicInteger();
+		RuntimeException exception = new NumberFormatException();
 
-		@SuppressWarnings("serial")
-		class TechnicalException extends Exception {
-			public TechnicalException(String message) {
-				super(message);
-			}
-		}
-
-		TechnicalException technicalException = new TechnicalException("Error while invoking greeting service");
-
-		RetryCallback<String> retryCallback = new RetryCallback<>() {
+		Retryable<String> retryable = new Retryable<>() {
 			@Override
-			public String run() throws TechnicalException {
-				throw technicalException;
+			public String execute() {
+				invocationCount.incrementAndGet();
+				throw exception;
 			}
 
 			@Override
 			public String getName() {
-				return "greeting service";
+				return "always fails";
 			}
 		};
 
-		MaxRetryAttemptsPolicy retryPolicy = new MaxRetryAttemptsPolicy() {
-			@Override
-			public RetryExecution start() {
-				return new RetryExecution() {
-
-					int retryAttempts;
-
-					@Override
-					public boolean shouldRetry(Throwable throwable) {
-						return this.retryAttempts++ < 3 && throwable instanceof TechnicalException;
-					}
-				};
-			}
-		};
+		AtomicInteger retryCount = new AtomicInteger();
+		// Custom RetryPolicy that only retries for a NumberFormatException and max 5 retry attempts.
+		RetryPolicy retryPolicy = () -> throwable -> (retryCount.incrementAndGet() <= 5 && throwable instanceof NumberFormatException);
 		retryTemplate.setRetryPolicy(retryPolicy);
-		retryTemplate.setBackOffPolicy(new FixedBackOff(100, Long.MAX_VALUE));
 
+		assertThat(invocationCount).hasValue(0);
+		assertThat(retryCount).hasValue(0);
 		assertThatExceptionOfType(RetryException.class)
-				.isThrownBy(() -> retryTemplate.execute(retryCallback))
-				.withMessage("Retry policy for callback 'greeting service' exhausted; aborting execution")
-				.withCause(technicalException);
+				.isThrownBy(() -> retryTemplate.execute(retryable))
+				.withMessage("Retry policy for operation 'always fails' exhausted; aborting execution")
+				.withCause(exception);
+		 // 6 = 1 initial invocation + 5 retry attempts
+		assertThat(invocationCount).hasValue(6);
+		assertThat(retryCount).hasValue(6);
 	}
 
 }
