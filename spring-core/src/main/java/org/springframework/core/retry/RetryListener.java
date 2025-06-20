@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2025 the original author or authors.
+ * Copyright 2002-present the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
  */
 
 package org.springframework.core.retry;
+
+import org.jspecify.annotations.Nullable;
 
 import org.springframework.core.retry.support.CompositeRetryListener;
 
@@ -40,15 +42,15 @@ public interface RetryListener {
 	/**
 	 * Called after the first successful retry attempt.
 	 * @param retryExecution the retry execution
-	 * @param result the result of the callback
+	 * @param result the result of the {@link Retryable}
 	 */
-	default void onRetrySuccess(RetryExecution retryExecution, Object result) {
+	default void onRetrySuccess(RetryExecution retryExecution, @Nullable Object result) {
 	}
 
 	/**
 	 * Called every time a retry attempt fails.
 	 * @param retryExecution the retry execution
-	 * @param throwable the exception thrown by the callback
+	 * @param throwable the exception thrown by the {@link Retryable}
 	 */
 	default void onRetryFailure(RetryExecution retryExecution, Throwable throwable) {
 	}
@@ -56,7 +58,7 @@ public interface RetryListener {
 	/**
 	 * Called if the {@link RetryPolicy} is exhausted.
 	 * @param retryExecution the retry execution
-	 * @param throwable the last exception thrown by the {@link RetryCallback}
+	 * @param throwable the last exception thrown by the {@link Retryable}
 	 */
 	default void onRetryPolicyExhaustion(RetryExecution retryExecution, Throwable throwable) {
 	}

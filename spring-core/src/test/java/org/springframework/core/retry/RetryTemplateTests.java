@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2025 the original author or authors.
+ * Copyright 2002-present the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,25 @@
 
 package org.springframework.core.retry;
 
-import org.junit.jupiter.api.Test;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
-import org.springframework.core.retry.support.MaxRetryAttemptsPolicy;
+import org.assertj.core.api.ThrowingConsumer;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments.ArgumentSet;
+import org.junit.jupiter.params.provider.FieldSource;
+
 import org.springframework.util.backoff.FixedBackOff;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.params.provider.Arguments.argumentSet;
 
 /**
  * Tests for {@link RetryTemplate}.
@@ -35,100 +47,205 @@ class RetryTemplateTests {
 
 	private final RetryTemplate retryTemplate = new RetryTemplate();
 
-	@Test
-	void retryWithSuccess() throws Exception {
-		RetryCallback<String> retryCallback = new RetryCallback<>() {
 
-			int failure;
-
-			@Override
-			public String run() throws Exception {
-				if (failure++ < 2) {
-					throw new Exception("Error while invoking greeting service");
-				}
-				return "hello world";
-			}
-
-			@Override
-			public String getName() {
-				return "greeting service";
-			}
-		};
-
-		retryTemplate.setBackOffPolicy(new FixedBackOff(100, Long.MAX_VALUE));
-
-		assertThat(retryTemplate.execute(retryCallback)).isEqualTo("hello world");
+	@BeforeEach
+	void configureTemplate() {
+		this.retryTemplate.setBackOffPolicy(new FixedBackOff(Duration.ofMillis(10)));
 	}
 
 	@Test
-	void retryWithFailure() {
-		Exception exception = new Exception("Error while invoking greeting service");
+	void retryWithImmediateSuccess() throws Exception {
+		AtomicInteger invocationCount = new AtomicInteger();
+		Retryable<String> retryable = () -> {
+			invocationCount.incrementAndGet();
+			return "always succeeds";
+		};
 
-		RetryCallback<String> retryCallback = new RetryCallback<>() {
+		assertThat(invocationCount).hasValue(0);
+		assertThat(retryTemplate.execute(retryable)).isEqualTo("always succeeds");
+		assertThat(invocationCount).hasValue(1);
+	}
+
+	@Test
+	void retryWithSuccessAfterInitialFailures() throws Exception {
+		AtomicInteger invocationCount = new AtomicInteger();
+		Retryable<String> retryable = () -> {
+			if (invocationCount.incrementAndGet() <= 2) {
+				throw new Exception("Boom!");
+			}
+			return "finally succeeded";
+		};
+
+		assertThat(invocationCount).hasValue(0);
+		assertThat(retryTemplate.execute(retryable)).isEqualTo("finally succeeded");
+		assertThat(invocationCount).hasValue(3);
+	}
+
+	@Test
+	void retryWithExhaustedPolicy() {
+		var invocationCount = new AtomicInteger();
+		var exception = new RuntimeException("Boom!");
+
+		var retryable = new Retryable<>() {
 			@Override
-			public String run() throws Exception {
+			public String execute() {
+				invocationCount.incrementAndGet();
 				throw exception;
 			}
 
 			@Override
 			public String getName() {
-				return "greeting service";
+				return "test";
 			}
 		};
 
-		retryTemplate.setBackOffPolicy(new FixedBackOff(100, Long.MAX_VALUE));
-
+		assertThat(invocationCount).hasValue(0);
 		assertThatExceptionOfType(RetryException.class)
-				.isThrownBy(() -> retryTemplate.execute(retryCallback))
-				.withMessage("Retry policy for callback 'greeting service' exhausted; aborting execution")
+				.isThrownBy(() -> retryTemplate.execute(retryable))
+				.withMessage("Retry policy for operation 'test' exhausted; aborting execution")
 				.withCause(exception);
+		// 4 = 1 initial invocation + 3 retry attempts
+		assertThat(invocationCount).hasValue(4);
 	}
 
 	@Test
-	void retrySpecificException() {
+	void retryWithFailingRetryableAndCustomRetryPolicyWithMultiplePredicates() {
+		var invocationCount = new AtomicInteger();
+		var exception = new NumberFormatException("Boom!");
 
-		@SuppressWarnings("serial")
-		class TechnicalException extends Exception {
-			public TechnicalException(String message) {
-				super(message);
-			}
-		}
-
-		TechnicalException technicalException = new TechnicalException("Error while invoking greeting service");
-
-		RetryCallback<String> retryCallback = new RetryCallback<>() {
+		var retryable = new Retryable<>() {
 			@Override
-			public String run() throws TechnicalException {
-				throw technicalException;
+			public String execute() {
+				invocationCount.incrementAndGet();
+				throw exception;
 			}
 
 			@Override
 			public String getName() {
-				return "greeting service";
+				return "always fails";
 			}
 		};
 
-		MaxRetryAttemptsPolicy retryPolicy = new MaxRetryAttemptsPolicy() {
+		var retryPolicy = RetryPolicy.builder()
+				.maxAttempts(5)
+				.maxDuration(Duration.ofMillis(100))
+				.predicate(NumberFormatException.class::isInstance)
+				.predicate(t -> t.getMessage().equals("Boom!"))
+				.build();
+
+		retryTemplate.setRetryPolicy(retryPolicy);
+
+		assertThat(invocationCount).hasValue(0);
+		assertThatExceptionOfType(RetryException.class)
+				.isThrownBy(() -> retryTemplate.execute(retryable))
+				.withMessage("Retry policy for operation 'always fails' exhausted; aborting execution")
+				.withCause(exception);
+		// 6 = 1 initial invocation + 5 retry attempts
+		assertThat(invocationCount).hasValue(6);
+	}
+
+	@Test
+	void retryWithExceptionIncludes() {
+		var invocationCount = new AtomicInteger();
+
+		var retryable = new Retryable<>() {
 			@Override
-			public RetryExecution start() {
-				return new RetryExecution() {
-
-					int retryAttempts;
-
-					@Override
-					public boolean shouldRetry(Throwable throwable) {
-						return this.retryAttempts++ < 3 && throwable instanceof TechnicalException;
-					}
+			public String execute() throws Exception {
+				return switch (invocationCount.incrementAndGet()) {
+					case 1 -> throw new FileNotFoundException();
+					case 2 -> throw new IOException();
+					case 3 -> throw new IllegalStateException();
+					default -> "success";
 				};
 			}
-		};
-		retryTemplate.setRetryPolicy(retryPolicy);
-		retryTemplate.setBackOffPolicy(new FixedBackOff(100, Long.MAX_VALUE));
 
+			@Override
+			public String getName() {
+				return "test";
+			}
+		};
+
+		var retryPolicy = RetryPolicy.builder()
+				.maxAttempts(Integer.MAX_VALUE)
+				.includes(IOException.class)
+				.build();
+
+		retryTemplate.setRetryPolicy(retryPolicy);
+
+		assertThat(invocationCount).hasValue(0);
 		assertThatExceptionOfType(RetryException.class)
-				.isThrownBy(() -> retryTemplate.execute(retryCallback))
-				.withMessage("Retry policy for callback 'greeting service' exhausted; aborting execution")
-				.withCause(technicalException);
+				.isThrownBy(() -> retryTemplate.execute(retryable))
+				.withMessage("Retry policy for operation 'test' exhausted; aborting execution")
+				.withCauseExactlyInstanceOf(IllegalStateException.class)
+				.satisfies(hasSuppressedExceptionsSatisfyingExactly(
+					suppressed1 -> assertThat(suppressed1).isExactlyInstanceOf(IOException.class),
+					suppressed2 -> assertThat(suppressed2).isExactlyInstanceOf(FileNotFoundException.class)
+				));
+		// 3 = 1 initial invocation + 2 retry attempts
+		assertThat(invocationCount).hasValue(3);
+	}
+
+	static final List<ArgumentSet> includesAndExcludesRetryPolicies = List.of(
+			argumentSet("Excludes",
+						RetryPolicy.builder()
+							.maxAttempts(Integer.MAX_VALUE)
+							.excludes(FileNotFoundException.class)
+							.build()),
+			argumentSet("Includes & Excludes",
+						RetryPolicy.builder()
+							.maxAttempts(Integer.MAX_VALUE)
+							.includes(IOException.class)
+							.excludes(FileNotFoundException.class)
+							.build())
+		);
+
+	@ParameterizedTest
+	@FieldSource("includesAndExcludesRetryPolicies")
+	void retryWithIncludesAndExcludesRetryPolicies(RetryPolicy retryPolicy) {
+		retryTemplate.setRetryPolicy(retryPolicy);
+
+		var invocationCount = new AtomicInteger();
+
+		var retryable = new Retryable<>() {
+			@Override
+			public String execute() throws Exception {
+				return switch (invocationCount.incrementAndGet()) {
+					case 1 -> throw new IOException();
+					case 2 -> throw new IOException();
+					case 3 -> throw new CustomFileNotFoundException();
+					default -> "success";
+				};
+			}
+
+			@Override
+			public String getName() {
+				return "test";
+			}
+		};
+
+		assertThat(invocationCount).hasValue(0);
+		assertThatExceptionOfType(RetryException.class)
+				.isThrownBy(() -> retryTemplate.execute(retryable))
+				.withMessage("Retry policy for operation 'test' exhausted; aborting execution")
+				.withCauseExactlyInstanceOf(CustomFileNotFoundException.class)
+				.satisfies(hasSuppressedExceptionsSatisfyingExactly(
+					suppressed1 -> assertThat(suppressed1).isExactlyInstanceOf(IOException.class),
+					suppressed2 -> assertThat(suppressed2).isExactlyInstanceOf(IOException.class)
+				));
+		// 3 = 1 initial invocation + 2 retry attempts
+		assertThat(invocationCount).hasValue(3);
+	}
+
+
+	@SafeVarargs
+	private static final Consumer<Throwable> hasSuppressedExceptionsSatisfyingExactly(
+			ThrowingConsumer<? super Throwable>... requirements) {
+		return throwable -> assertThat(throwable.getSuppressed()).satisfiesExactly(requirements);
+	}
+
+
+	@SuppressWarnings("serial")
+	private static class CustomFileNotFoundException extends FileNotFoundException {
 	}
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2025 the original author or authors.
+ * Copyright 2002-present the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,26 +14,21 @@
  * limitations under the License.
  */
 
-package org.springframework.core.retry.support;
+package org.springframework.core.retry;
 
-import java.time.Duration;
-
-import org.junit.jupiter.api.Test;
-
-import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import java.util.function.Predicate;
 
 /**
- * Tests for {@link MaxRetryDurationPolicy}.
+ * Predicate that matches {@link NumberFormatException}.
  *
- * @author Mahmoud Ben Hassine
+ * @author Sam Brannen
+ * @since 7.0
  */
-class MaxRetryDurationPolicyTests {
+class NumberFormatExceptionMatcher implements Predicate<Throwable> {
 
-	@Test
-	void invalidMaxRetryDuration() {
-		assertThatIllegalArgumentException()
-				.isThrownBy(() -> new MaxRetryDurationPolicy(Duration.ZERO))
-				.withMessage("Max retry duration must be positive");
+	@Override
+	public boolean test(Throwable throwable) {
+		return (throwable instanceof NumberFormatException);
 	}
 
 }
