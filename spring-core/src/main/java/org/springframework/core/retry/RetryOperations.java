@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2025 the original author or authors.
+ * Copyright 2002-present the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,9 @@ import org.jspecify.annotations.Nullable;
  * <p>Implemented by {@link RetryTemplate}. Not often used directly, but a useful
  * option to enhance testability, as it can easily be mocked or stubbed.
  *
+ * <p>Inspired by the <a href="https://github.com/spring-projects/spring-retry">Spring Retry</a>
+ * project but redesigned as a minimal core retry feature in the Spring Framework.
+ *
  * @author Mahmoud Ben Hassine
  * @since 7.0
  * @see RetryTemplate
@@ -31,16 +34,16 @@ import org.jspecify.annotations.Nullable;
 public interface RetryOperations {
 
 	/**
-	 * Execute the given callback (according to the {@link RetryPolicy} configured
-	 * at the implementation level) until it succeeds, or eventually throw an
-	 * exception if the {@code RetryPolicy} is exhausted.
-	 * @param retryCallback the callback to call initially and retry if needed
+	 * Execute the given {@link Retryable} (according to the {@link RetryPolicy}
+	 * configured at the implementation level) until it succeeds, or eventually
+	 * throw an exception if the {@code RetryPolicy} is exhausted.
+	 * @param retryable the {@code Retryable} to execute and retry if needed
 	 * @param <R> the type of the result
-	 * @return the result of the callback, if any
+	 * @return the result of the {@code Retryable}, if any
 	 * @throws RetryException if the {@code RetryPolicy} is exhausted; exceptions
 	 * encountered during retry attempts should be made available as suppressed
 	 * exceptions
 	 */
-	<R extends @Nullable Object> R execute(RetryCallback<R> retryCallback) throws RetryException;
+	<R> @Nullable R execute(Retryable<? extends @Nullable R> retryable) throws RetryException;
 
 }

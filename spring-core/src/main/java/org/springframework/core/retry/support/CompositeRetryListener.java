@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2025 the original author or authors.
+ * Copyright 2002-present the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,17 +19,19 @@ package org.springframework.core.retry.support;
 import java.util.LinkedList;
 import java.util.List;
 
-import org.springframework.core.retry.RetryExecution;
+import org.jspecify.annotations.Nullable;
+
 import org.springframework.core.retry.RetryListener;
+import org.springframework.core.retry.RetryPolicy;
 import org.springframework.core.retry.RetryTemplate;
+import org.springframework.core.retry.Retryable;
 import org.springframework.util.Assert;
 
 /**
  * A composite implementation of the {@link RetryListener} interface.
+ * Delegate listeners will be called in their registration order.
  *
  * <p>This class is used to compose multiple listeners within a {@link RetryTemplate}.
- *
- * <p>Delegate listeners will be called in their registration order.
  *
  * @author Mahmoud Ben Hassine
  * @since 7.0
@@ -63,24 +65,25 @@ public class CompositeRetryListener implements RetryListener {
 		this.listeners.add(listener);
 	}
 
+
 	@Override
-	public void beforeRetry(RetryExecution retryExecution) {
-		this.listeners.forEach(retryListener -> retryListener.beforeRetry(retryExecution));
+	public void beforeRetry(RetryPolicy retryPolicy, Retryable<?> retryable) {
+		this.listeners.forEach(retryListener -> retryListener.beforeRetry(retryPolicy, retryable));
 	}
 
 	@Override
-	public void onRetrySuccess(RetryExecution retryExecution, Object result) {
-		this.listeners.forEach(listener -> listener.onRetrySuccess(retryExecution, result));
+	public void onRetrySuccess(RetryPolicy retryPolicy, Retryable<?> retryable, @Nullable Object result) {
+		this.listeners.forEach(listener -> listener.onRetrySuccess(retryPolicy, retryable, result));
 	}
 
 	@Override
-	public void onRetryFailure(RetryExecution retryExecution, Throwable throwable) {
-		this.listeners.forEach(listener -> listener.onRetryFailure(retryExecution, throwable));
+	public void onRetryFailure(RetryPolicy retryPolicy, Retryable<?> retryable, Throwable throwable) {
+		this.listeners.forEach(listener -> listener.onRetryFailure(retryPolicy, retryable, throwable));
 	}
 
 	@Override
-	public void onRetryPolicyExhaustion(RetryExecution retryExecution, Throwable throwable) {
-		this.listeners.forEach(listener -> listener.onRetryPolicyExhaustion(retryExecution, throwable));
+	public void onRetryPolicyExhaustion(RetryPolicy retryPolicy, Retryable<?> retryable, Throwable throwable) {
+		this.listeners.forEach(listener -> listener.onRetryPolicyExhaustion(retryPolicy, retryable, throwable));
 	}
 
 }

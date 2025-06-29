@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2025 the original author or authors.
+ * Copyright 2002-present the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,19 @@
 
 package org.springframework.core.retry;
 
+import org.jspecify.annotations.Nullable;
+
 import org.springframework.core.retry.support.CompositeRetryListener;
 
 /**
- * An extension point that allows to inject code during key retry phases.
+ * {@code RetryListener} defines a <em>listener</em> API for reacting to events
+ * published during the execution of a {@link Retryable} operation.
  *
  * <p>Typically registered in a {@link RetryTemplate}, and can be composed using
  * a {@link CompositeRetryListener}.
  *
  * @author Mahmoud Ben Hassine
+ * @author Sam Brannen
  * @since 7.0
  * @see CompositeRetryListener
  */
@@ -32,33 +36,37 @@ public interface RetryListener {
 
 	/**
 	 * Called before every retry attempt.
-	 * @param retryExecution the retry execution
+	 * @param retryPolicy the {@link RetryPolicy}
+	 * @param retryable the {@link Retryable} operation
 	 */
-	default void beforeRetry(RetryExecution retryExecution) {
+	default void beforeRetry(RetryPolicy retryPolicy, Retryable<?> retryable) {
 	}
 
 	/**
 	 * Called after the first successful retry attempt.
-	 * @param retryExecution the retry execution
-	 * @param result the result of the callback
+	 * @param retryPolicy the {@link RetryPolicy}
+	 * @param retryable the {@link Retryable} operation
+	 * @param result the result of the {@code Retryable} operation
 	 */
-	default void onRetrySuccess(RetryExecution retryExecution, Object result) {
+	default void onRetrySuccess(RetryPolicy retryPolicy, Retryable<?> retryable, @Nullable Object result) {
 	}
 
 	/**
 	 * Called every time a retry attempt fails.
-	 * @param retryExecution the retry execution
-	 * @param throwable the exception thrown by the callback
+	 * @param retryPolicy the {@link RetryPolicy}
+	 * @param retryable the {@link Retryable} operation
+	 * @param throwable the exception thrown by the {@code Retryable} operation
 	 */
-	default void onRetryFailure(RetryExecution retryExecution, Throwable throwable) {
+	default void onRetryFailure(RetryPolicy retryPolicy, Retryable<?> retryable, Throwable throwable) {
 	}
 
 	/**
 	 * Called if the {@link RetryPolicy} is exhausted.
-	 * @param retryExecution the retry execution
-	 * @param throwable the last exception thrown by the {@link RetryCallback}
+	 * @param retryPolicy the {@code RetryPolicy}
+	 * @param retryable the {@code Retryable} operation
+	 * @param throwable the last exception thrown by the {@link Retryable} operation
 	 */
-	default void onRetryPolicyExhaustion(RetryExecution retryExecution, Throwable throwable) {
+	default void onRetryPolicyExhaustion(RetryPolicy retryPolicy, Retryable<?> retryable, Throwable throwable) {
 	}
 
 }
